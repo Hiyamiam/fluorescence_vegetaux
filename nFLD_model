@@ -1,0 +1,133 @@
+import pandas as pd
+import os
+import numpy as np
+import time
+import matplotlib.pyplot as plt
+
+O2BWL = [(685.032, 685.326), (686.01, 686.304), (687.183, 687.476), (688.354, 688.647), (692.053, 692.344)]
+O2AWL = [(757.481, 758.554), (760.341, 761.41), (769.118, 770.175)]
+
+"""
+computing_means prend en entrée la bande d'oxygène souhaitée (A ou B), 
+le fichier d'étude où on voudrait extraire la fluorescence,
+la présence de bruit ou non. 
+Cette fonction permet de calculer, pour chaque paire de longueurs d'onde (de O2AWL ou O2BWL),
+la moyenne de chaque grandeur : la longueur d'onde, la luminance de la végétation et l'éclairement.
+"""
+
+def computing_means(channel, file, noise=True):
+    dataframe = pd.read_excel(file)
+    keys = {True: ('incident_smoothed_bruit', 'vegetation_smoothed_bruit'), False: ('incident_smoothed', 'vegetation_smoothed')}
+    incident_key, vegetation_key = keys[noise]
+    incident = []
+    vegetation = []
+    wavelength = []
+    for wvlmin, wvlmax in channel:
+        indexmin, indexmax = None, None
+        for i, wvl in enumerate(dataframe['wavelength']):
+            if wvlmin < dataframe.iloc[i]['wavelength'] and indexmin == None:
+                indexmin = i
+            if wvlmax < dataframe.iloc[i]['wavelength'] and indexmax == None:
+                indexmax = i
+        incident.append(dataframe.iloc[indexmin:indexmax][incident_key].mean(axis=0))
+        vegetation.append(dataframe.iloc[indexmin:indexmax][vegetation_key].mean(axis=0))
+        wavelength.append(dataframe.iloc[indexmin:indexmax]['wavelength'].mean(axis=0))
+    return vegetation, incident, wavelength
+
+# vegetation, incident, wavelength = computing_means(O2BWL,'C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\12h-ruralvis23-doy172\\LAI_3.0.xlsx')
+# vegetation1, incident1, wavelength1 = computing_means(O2BWL,'C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\12h-ruralvis23-doy172\\LAI_3.0.xlsx',noise=False)
+# plt.plot(wavelength, incident)
+# plt.plot(wavelength, incident1)
+
+def choosing_method_for_O2B(method,file,noise=True):
+    KfB = [1.044, 1.029, 1., 0.9619, 0.8133]
+    # Returns the first four bands
+    if method == 1:
+        L, Lr, lambdas, K = computing_means(O2BWL,file,noise)[0][:-1],computing_means(O2BWL,file,noise)[1][:-1],computing_means(O2BWL,file,noise)[2][:-1],KfB[:-1]
+    # Returns the last four bands
+    if method == 2:
+        L, Lr, lambdas, K = computing_means(O2BWL,file,noise)[0][1:],computing_means(O2BWL,file,noise)[1][1:],computing_means(O2BWL,file,noise)[2][1:],KfB[1:]
+    return L, Lr, lambdas, K
+
+def theta(n,k,lambdas):
+    if n==3:
+        if k==1:
+            return (lambdas[1]-lambdas[2])
+        if k==2:
+            return (lambdas[0]-lambdas[2])
+        if k==3:
+            return (lambdas[0]-lambdas[1])
+    if n==4:
+        if k==1:
+            return (lambdas[1]-lambdas[2])*(lambdas[1]-lambdas[3])*(lambdas[2]-lambdas[3])
+        if k==2:
+            return (lambdas[0]-lambdas[2])*(lambdas[0]-lambdas[3])*(lambdas[2]-lambdas[3])
+        if k==3:
+            return (lambdas[0]-lambdas[1])*(lambdas[0]-lambdas[3])*(lambdas[1]-lambdas[3])
+        if k==4:
+            return (lambdas[0]-lambdas[1])*(lambdas[0]-lambdas[2])*(lambdas[1]-lambdas[2])
+
+def fluo(n,file='C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\12h-ruralvis23-doy172\\LAI_3.0.xlsx',method=None,noise=True):
+    sum1 = 0
+    sum2 = 0
+    KfA = [1.111, 1., 0.657]
+    if n == 3:
+        L, Lr, lambdas = computing_means(O2AWL,file,noise)
+        K = KfA
+    if n == 4:
+        L, Lr, lambdas, K = choosing_method_for_O2B(method,file,noise)
+    for i in range(n):
+        sum1 += ((-1)**i)*L[i]*theta(n,i+1,lambdas)/Lr[i]
+        sum2 += ((-1)**i)*K[i]*theta(n,i+1,lambdas)/Lr[i]
+    return sum1/sum2
+
+def create_database_nfld(main_folder='C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\',path_file='C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\12h-ruralvis23-doy172\\'):
+    n_folder = len(os.listdir(main_folder))
+    n_file = len(os.listdir(path_file))
+
+    result_A = np.zeros((n_folder, n_file, 2))
+    result_B = np.zeros((n_folder, n_file, 2, 2))
+
+    n_iter_A = 2*n_folder*n_file
+    current_iter_A = 0
+    start_A = time.time()
+
+    n_iter_B = 2*n_folder*n_file*2
+    current_iter_B = 0
+    start_B = time.time()
+
+    for i, folder in enumerate(os.listdir(main_folder)):
+        for j, file in enumerate(os.listdir((main_folder + folder))):
+            for l, noise in enumerate([True, False]):
+                filename = main_folder + folder + '\\' + file
+                result_A[i, j, l] = fluo(3, filename, noise)
+                current_iter_A = 1 + current_iter_A
+                current_time_elapsed_A = time.time() - start_A
+                eta = int((n_iter_A - current_iter_A) * current_time_elapsed_A / current_iter_A)
+                hours = int(eta / 3600)
+                minutes = int((eta - 3600 * hours) / 60)
+                seconds = eta - 3600 * hours - 60 * minutes
+                print("eta : " + str(hours) + ":" + str(minutes) + ":" + str(seconds))
+
+    for i, folder in enumerate(os.listdir(main_folder)):
+        for j, file in enumerate(os.listdir((main_folder + folder))):
+            for k, method in [(0, 1), (1, 2)]:
+                for l, noise in enumerate([True, False]):
+                    filename = main_folder + folder + '\\' + file
+                    result_B[i, j, k, l] = fluo(4, filename, method, noise)
+                    current_iter_B = 1 + current_iter_B
+                    current_time_elapsed_B = time.time() - start_B
+                    eta = int((n_iter_B - current_iter_B) * current_time_elapsed_B / current_iter_B)
+                    hours = int(eta / 3600)
+                    minutes = int((eta - 3600 * hours) / 60)
+                    seconds = eta - 3600 * hours - 60 * minutes
+                    print("eta : " + str(hours) + ":" + str(minutes) + ":" + str(seconds))
+
+    return result_A, result_B
+
+def save_table(result_A, result_B):
+    np.save('resultats_nFLDA', result_A)
+    np.save('resultats_nFLDB', result_B)
+
+A, B = create_database_nfld()
+save_table(A, B)
