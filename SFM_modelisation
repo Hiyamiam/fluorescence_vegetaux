@@ -1,0 +1,200 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.optimize import fmin
+from scipy.interpolate import spline
+import pandas as pd
+import os
+import time
+
+"""
+Fonction prenant en entrée le fichier d'étude 'file' et le bruit. Le fichier de données est converti 
+en DataFrame. Les données pertinentes sont ensuite extraites : les longueurs d'onde, les luminances 
+de végétation et l'éclairement solaire. Contrairement au nFLD, toutes les valeurs sont extraites.
+"""
+def extract_incident_vegetation(file,noise=True):
+    dataframe = pd.read_excel(file)
+    keys = {True: ('incident_smoothed_bruit', 'vegetation_smoothed_bruit'), False: ('incident_smoothed', 'vegetation_smoothed')}
+    incident_key, vegetation_key = keys[noise]
+    wavelength = np.asarray(dataframe['wavelength'])
+    incident = np.asarray(dataframe[incident_key])
+    vegetation = np.asarray(dataframe[vegetation_key])
+    return wavelength,incident,vegetation
+
+"""
+Fonction permettant le choix de la bande et son intervalle. La valeur peut être choisie en fonction du début
+d'absorption de la bande (wvl_min) et la fin d'absorption de la bande (wvl_max). La fonction prend également
+en entrée le fichier dont la fluorescence doit être extraite. Idem que toutes les autres fonctions,
+le bruit peut être pris en compte ou non. Pour que le bruit soit présent, garder la valeur mise par défaut.
+Sinon, mettre noise=False. Je prendrai wvl_min=759,3 et wvl_max=768 pour la bande O2A (en nanomètres). 
+Quant à la bande B, je prendrai wvl_min=686,5 et wvl_max=690.
+La fonction renvoie 3 listes des valeurs de luminances, éclairement et longueurs d'onde.
+"""
+def choosing_band(wvl_min,wvl_max,file,noise=True):
+    wavelength, incident, vegetation = extract_incident_vegetation(file,noise)
+    dataframe = pd.read_excel(file)
+    new_wvl, new_Lup, new_Lin = [], [], []
+    for i in range(len(dataframe)):
+        if wvl_min < dataframe.iloc[i]['wavelength'] < wvl_max:
+            new_wvl.append(wavelength[i])
+            new_Lup.append(vegetation[i])
+            new_Lin.append(incident[i])
+    return np.array(new_wvl),np.array(new_Lup),np.array(new_Lin)
+
+def poly(tup, lmbda):
+    s=0*lmbda
+    for i, coeff in enumerate(tup):
+            s += coeff*lmbda**i
+    return s
+
+def cubic_spline(wavelengths):
+    def temp(tup,xk):
+        lmbda = wavelengths
+        yk = np.array(list(tup))
+        points = len(tup)
+        lambdamin = int(min(lmbda))
+        lambdamax = int(max(lmbda))
+        xnew = np.around(np.linspace(0.9*lambdamin,1.1*lambdamax,points))
+        if type(xk) == float:
+            return spline(xnew, yk, [xk])[0]
+        return spline(xnew,yk,xk)
+    return temp
+
+def main(file,wvcenter,plot=True,wvlmin=None,wvlmax=None,choice_func_reflectance=None,choice_func_fluorescence=None,choice_reflectance=None,choice_fluorescence=None,noise=True, choosed_band=None, output_error=False):
+
+    if wvlmin == None: wvlmin = int(input("Whats the minimum wavelength? "))
+    if wvlmax == None: wvlmax = int(input("Whats the maximum wavelength? "))
+    if choosed_band == None:
+        wvl, Lup, Lin = choosing_band(wvlmin,wvlmax,file,noise)
+    else:
+        wvl, Lup, Lin = choosed_band
+
+    dictfunc = {'poly':poly,'spline':cubic_spline(wvl)}
+    if choice_func_reflectance == None: choice_func_reflectance = input('Which function to choose for the reflectance? ')
+    if choice_func_fluorescence == None: choice_func_fluorescence = input('Which function to choose for the fluorescence? ')
+    func_reflectance = dictfunc[choice_func_reflectance]
+    func_fluorescence = dictfunc[choice_func_fluorescence]
+    # wvcenter = wvl[round(len(wvl)/2)]
+
+    if choice_reflectance == None: choice_reflectance = input("How many parameters do you wish to choose for the reflectance? ")
+    if choice_fluorescence == None: choice_fluorescence = input("How many parameters do you wish to choose for the fluorescence? ")
+    #models = {'1':2, '2':3, '3':4, '5':6}
+    models = {'1':1, '2':2, '3':3, '4':4, '5':5, '6':6}
+    order_reflectance, order_fluorescence = models[choice_reflectance], models[choice_fluorescence]
+    def f(l):
+        params_reflectance, params_fluorescence = l[0:order_reflectance], l[order_reflectance:order_fluorescence+order_reflectance]
+        return np.sum((func_reflectance(params_reflectance,wvl)*Lin + func_fluorescence(params_fluorescence,wvl)-Lup)**2)
+    if choice_func_reflectance == 'poly':
+        l_reflec = [0.0007]+[0 for i in range(order_reflectance-1)]
+    else:
+        l_reflec = [0.0007 for i in range(order_reflectance)]
+    if choice_func_fluorescence == 'poly':
+        l_fluo = [0.001] + [0 for i in range(order_fluorescence-1)]
+    else:
+        l_fluo = [0.001 for i in range(order_fluorescence)]
+    L = np.array(l_reflec + l_fluo)   #first guess optimized
+
+    result = fmin(f, L, maxiter = 2000, disp = False)
+
+    params_reflectance, params_fluorescence = result[0:order_reflectance], result[order_reflectance:order_fluorescence+order_reflectance]
+
+    # print("rho = " + str(func_reflectance(params_reflectance, wvcenter)),
+    # "\nfluo = " + str(func_fluorescence(params_fluorescence, wvcenter)), "\nresidual = " + str(residu), "\nnormalized residual = " + '{:.1%}'.format(normalized_residual))
+    if plot:
+            residualsqrd = f(result)
+            residu = np.sqrt(residualsqrd / len(wvl))
+            plt.subplot(221)
+            plt.plot(wvl, (func_reflectance(params_reflectance, wvl)*Lin + func_fluorescence(params_fluorescence, wvl))*1000, label='Modèle', linewidth=4)
+            plt.plot(wvl, Lup*1000, label='Végétation', linewidth=4)
+            plt.plot(wvl, Lin*1000, label='Incident', linewidth=4)
+            plt.xlabel('Longueur d\'onde ($nm$)')
+            plt.ylabel('Luminance ($mW/m^{2}/nm/sr$)')
+            plt.legend(loc='upper right')
+            plt.grid()
+
+            plt.subplot(222)
+            reflectance = pd.read_excel(file)
+            abscisse_estime = []
+            ordonnee_estime = []
+            for i, wavelength in enumerate(reflectance['wavelength']):
+                if min(wvl) <= wavelength <= max(wvl):
+                    abscisse_estime.append(wavelength)
+                    ordonnee_estime.append(reflectance['reflectance'][i])
+            plt.plot(abscisse_estime, ordonnee_estime, label = 'Réflectance introduite', linestyle='dashed', linewidth=4)
+            plt.plot(wvl, func_reflectance(params_reflectance, wvl), label='Réflectance estimée', color='red', linewidth=4)
+            left, right = plt.xlim()
+            #plt.plot(reflectance['wavelength'], reflectance['reflectance'], linewidth=4, label='Réflectance introduite', linestyle='dashed')
+            min1, min2 = min(ordonnee_estime), min(func_reflectance(params_reflectance, wvl))
+            max1, max2 = max(ordonnee_estime), max(func_reflectance(params_reflectance, wvl))
+            plt.xlim(left, right)
+            min1, max1 = min(min1, min2), max(max1,max2)
+            plt.ylim(min1 -0.1 * (max1 - min1), max1 + 0.1 * (max1 - min1))
+            plt.xlabel('Longueur d\'onde ($nm$)')
+            plt.ylabel('Réflectance')
+            plt.grid()
+            plt.legend()
+            plt.subplot(223)
+            plt.plot(wvl, (func_reflectance(params_reflectance, wvl)*Lin + func_fluorescence(params_fluorescence, wvl) - Lup)*1000, label= 'Résidus', linewidth=4)
+            #plt.plot(wvl, np.sqrt(np.mean(((func_reflectance(params_reflectance, wvl)*Lin + func_fluorescence(params_fluorescence, wvl) - Lup)*1000)**2)),label=str(int(choice_fluorescence)) + ' noeuds', linewidth=4)
+            plt.xlabel('Longueur d\'onde ($nm$)')
+            plt.ylabel('Résidus ($mW/m^{2}/nm/sr$)')
+            plt.axhline(y=0, color='k')
+            plt.grid()
+            plt.legend()
+
+            plt.subplot(224)
+            fluorescence = pd.read_excel(file)
+            abscisse_estime = []
+            ordonnee_estime = []
+            for i, wavelength in enumerate(fluorescence['wavelength']):
+                if min(wvl) <= wavelength <= max(wvl):
+                    abscisse_estime.append(wavelength)
+                    ordonnee_estime.append(fluorescence['fluorescence'][i]*1000)
+            plt.plot(abscisse_estime, ordonnee_estime, label = 'Fluorescence introduite', linestyle='dashed', linewidth=4)
+            plt.plot(wvl, func_fluorescence(params_fluorescence, wvl)*1000, label='Fluorescence estimée', linewidth=4, color='green')
+            left, right = plt.xlim()
+            min1, min2 = min(ordonnee_estime), min(func_fluorescence(params_fluorescence, wvl)*1000)
+            max1, max2 = max(ordonnee_estime), max(func_fluorescence(params_fluorescence, wvl)*1000)
+            plt.xlim(left, right)
+            min1, max1 = min(min1, min2), max(max1,max2)
+            plt.ylim(min1 -0.1 * (max1 - min1), max1 + 0.1 * (max1 - min1))
+            plt.xlabel('Longueur d\'onde ($nm$)')
+            plt.ylabel('Fluorescence ($mW/m^{2}/nm/sr$)')
+            plt.grid()
+            plt.legend()
+            plt.show()
+    if output_error:
+        return np.sqrt(np.mean(((func_reflectance(params_reflectance, wvl)*Lin + func_fluorescence(params_fluorescence, wvl) - Lup)*1000)**2))
+    return func_fluorescence(params_fluorescence, wvcenter), func_reflectance(params_reflectance, wvcenter)
+
+def create_database_sfm(main_folder='‎/Volumes/W H/Stage M2/Codes/DATA/LUMINANCE_VEGETATION/',path_file='/Volumes/W H/Stage M2/Codes/DATA/LUMINANCE_VEGETATION/DATA/12h-ruralvis23-doy172/'):
+    n_folder = len(os.listdir(main_folder))
+    n_file = len(os.listdir(path_file))
+
+    l_possibilite = [(0, 'poly', '1'), (1, 'poly', '2'), (2, 'poly', '3'), (3, 'spline', '3'), (4, 'spline', '4'), (5, 'spline', '6')]
+    result = np.zeros((2, n_folder, n_file, 6, 6, 2))
+    n_iter = 2*n_folder*n_file*2
+    current_iter = 0
+    start = time.time()
+    for h, a_peak, wvl_min, wvl_max in [(0,760.8903601560975, 759.3, 768), (1, 687.332475700761, 686.5, 690)]:
+        for i, folder in enumerate(os.listdir(main_folder)):
+            for j, file in enumerate(os.listdir((main_folder + folder))):
+                filename = main_folder + folder + '/' + file
+                for m, noise in enumerate([True, False]):
+                    Choosed_band = choosing_band(wvl_min, wvl_max, main_folder + folder + '/' + file, noise)
+                    current_iter = 1 + current_iter
+                    current_time_elapsed = time.time() - start
+                    eta = int((n_iter - current_iter) * current_time_elapsed / current_iter)
+                    hours = int(eta / 3600)
+                    minutes = int((eta - 3600 * hours) / 60)
+                    seconds = eta - 3600 * hours - 60 * minutes
+                    print("eta : " + str(hours) + ":" + str(minutes) + ":" + str(seconds))
+                    for k, reflectance_method, reflectance_dof in l_possibilite:
+                        for l, fluo_method, fluo_dof in l_possibilite:
+                            result[h, i, j, k, l, m] = main(filename, a_peak, False, wvl_min, wvl_max, reflectance_method, fluo_method, reflectance_dof, fluo_dof, noise, choosed_band = Choosed_band)[0]
+    return result
+
+def save_table(result):
+    np.save('resultats_SFM', result)
+
+res = create_database_sfm()
+save_table(res)
