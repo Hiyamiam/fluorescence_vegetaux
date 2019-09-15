@@ -34,21 +34,30 @@ def computing_means(channel, file, noise=True):
         wavelength.append(dataframe.iloc[indexmin:indexmax]['wavelength'].mean(axis=0))
     return vegetation, incident, wavelength
 
-# vegetation, incident, wavelength = computing_means(O2BWL,'C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\12h-ruralvis23-doy172\\LAI_3.0.xlsx')
-# vegetation1, incident1, wavelength1 = computing_means(O2BWL,'C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\12h-ruralvis23-doy172\\LAI_3.0.xlsx',noise=False)
-# plt.plot(wavelength, incident)
-# plt.plot(wavelength, incident1)
-
+"""
+Cette fonction prend la méthode de la bande B d'oxygène en entrée : il y'a deux méthodes:
+- la méthode une qui prend les 4 premiers canaux des 5 initiaux
+- la méthode deux qui prend le 4 derniers canaux des 5 initiaux
+Elle prend aussi en entrée le fichier de données pour lequel on veut extraire la fluorescence
+et le bruit.
+Puisqu'il s'agit uniquement de la bande B, nous prenons que les coefficients de fluorescence pour B.
+"""
 def choosing_method_for_O2B(method,file,noise=True):
     KfB = [1.044, 1.029, 1., 0.9619, 0.8133]
-    # Returns the first four bands
+    # Renvoie les 4 premiers canaux
     if method == 1:
         L, Lr, lambdas, K = computing_means(O2BWL,file,noise)[0][:-1],computing_means(O2BWL,file,noise)[1][:-1],computing_means(O2BWL,file,noise)[2][:-1],KfB[:-1]
-    # Returns the last four bands
+    # Renvoie les 4 derniers canaux
     if method == 2:
         L, Lr, lambdas, K = computing_means(O2BWL,file,noise)[0][1:],computing_means(O2BWL,file,noise)[1][1:],computing_means(O2BWL,file,noise)[2][1:],KfB[1:]
     return L, Lr, lambdas, K
 
+"""
+Fonction de calcul de la fluorescence,
+prend en entrée le nombre de canaux pour la bande A d'oxygène (n=3)
+et le nombre de canaux pour la bande B d'oxygène (n=4),
+et une liste des longueurs d'onde
+"""
 def theta(n,k,lambdas):
     if n==3:
         if k==1:
@@ -67,7 +76,14 @@ def theta(n,k,lambdas):
         if k==4:
             return (lambdas[0]-lambdas[1])*(lambdas[0]-lambdas[2])*(lambdas[1]-lambdas[2])
 
-def fluo(n,file='C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\12h-ruralvis23-doy172\\LAI_3.0.xlsx',method=None,noise=True):
+"""
+Fonction permettant le calcul de la fluorescence,
+prend en entrée la bande (n=3 pour la bande A, n=4 pour la bande B),
+la méthode pour la bande B si n=4, et le bruit.
+Nous définissons les coefficients de fluorescence pour la bande A (KfA)
+et nous renvoyons la valeur de la fluorescence pour chaque méthode.
+"""
+def fluo(n,file,method=None,noise=True):
     sum1 = 0
     sum2 = 0
     KfA = [1.111, 1., 0.657]
@@ -81,6 +97,14 @@ def fluo(n,file='C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\
         sum2 += ((-1)**i)*K[i]*theta(n,i+1,lambdas)/Lr[i]
     return sum1/sum2
 
+"""
+Cette fonction permet de créer deux matrices regroupant les valeurs de fluorescence pour chaque fichier
+(une valeur pour O2A, et deux valeurs pour O2B car deux méthodes distinctes). 
+'result_A' regroupe les valeurs de fluorescence pour la bande A, et il y'en a autant
+que de fichiers. Idem pour 'result_B', sauf que celui-ci possède 2 méthodes donc la matrice aura
+une dimension de plus.
+Je calcule le temps mis par les matrices pour se remplir complètement.
+"""
 def create_database_nfld(main_folder='C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\',path_file='C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\LUMINANCE_VEGETATION\\12h-ruralvis23-doy172\\'):
     n_folder = len(os.listdir(main_folder))
     n_file = len(os.listdir(path_file))
@@ -124,7 +148,9 @@ def create_database_nfld(main_folder='C:\\Users\\Hiyam\\Documents\\Codes\\DATA\\
                     print("eta : " + str(hours) + ":" + str(minutes) + ":" + str(seconds))
 
     return result_A, result_B
-
+"""
+Cette fonction sauvegarde les resultats en un fichier .npy
+"""
 def save_table(result_A, result_B):
     np.save('resultats_nFLDA', result_A)
     np.save('resultats_nFLDB', result_B)
