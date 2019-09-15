@@ -40,12 +40,22 @@ def choosing_band(wvl_min,wvl_max,file,noise=True):
             new_Lin.append(incident[i])
     return np.array(new_wvl),np.array(new_Lup),np.array(new_Lin)
 
+"""
+Fonction permettant de définir les polynômes de degrés variant de 0 (1 paramètre)
+à 2 (3 paramètres). Elle prend en entrée un tuple (tup) et une liste de longueurs 
+d'onde (lmbda). En fonction du nombre de paramètre rentré, la fonction renvoie
+le polynôme 's' qui lui est associé.
+"""
 def poly(tup, lmbda):
     s=0*lmbda
     for i, coeff in enumerate(tup):
             s += coeff*lmbda**i
     return s
 
+"""
+Fonction permettant de définir les fonctions spline cubiques. 
+Elle prend en entrée une liste de longueurs d'onde (lmbda). 
+"""
 def cubic_spline(wavelengths):
     def temp(tup,xk):
         lmbda = wavelengths
@@ -59,6 +69,23 @@ def cubic_spline(wavelengths):
         return spline(xnew,yk,xk)
     return temp
 
+"""
+Fonction permettant de calculer la fluorescence en utilisant la méthode SFM.
+Elle prend en entrée le fichier pour lequel on souhaite extraire la fluorescence,
+la longueur d'onde du pic de la bande étudiée (O2A ou O2B), l'option de représenter
+graphiquement les résultats (plot=True), la longueur d'onde du début de la bande
+d'absorption (wvl_min), la longueur d'onde de la fin de la bande d'absorption (wvl_max),
+le choix du modèle mathématique de la réflectance (choice_func_reflectance), et de la 
+fluorescence (choice_func_fluorescence), le nombre de nœuds pour la réflectance (choice_reflectance)
+et la fluorescence (choice_fluorescence), le bruit (noise=True) ou pas (noise=False), le choix de la bande
+et enfin l'affichage de l'erreur commise entre la fluorescence renvoyée par le programme et la
+fluorescence 'réelle'.
+La fonction renvoie une valeur de réflectance et une valeur de fluorescence pour un modèle de réflectance
+et fluorescence donné. Elle permet aussi de représenter graphiquement la luminance de la végétation modélisée,
+la luminance de la végétation, et l'éclairement. Elle représente les résidus et les fluorescences et
+les réflectances modélisées et réelles.
+Choix de la fonction fmin pour la minimisation.
+"""
 def main(file,wvcenter,plot=True,wvlmin=None,wvlmax=None,choice_func_reflectance=None,choice_func_fluorescence=None,choice_reflectance=None,choice_fluorescence=None,noise=True, choosed_band=None, output_error=False):
 
     if wvlmin == None: wvlmin = int(input("Whats the minimum wavelength? "))
@@ -166,7 +193,15 @@ def main(file,wvcenter,plot=True,wvlmin=None,wvlmax=None,choice_func_reflectance
         return np.sqrt(np.mean(((func_reflectance(params_reflectance, wvl)*Lin + func_fluorescence(params_fluorescence, wvl) - Lup)*1000)**2))
     return func_fluorescence(params_fluorescence, wvcenter), func_reflectance(params_reflectance, wvcenter)
 
-def create_database_sfm(main_folder='‎/Volumes/W H/Stage M2/Codes/DATA/LUMINANCE_VEGETATION/',path_file='/Volumes/W H/Stage M2/Codes/DATA/LUMINANCE_VEGETATION/DATA/12h-ruralvis23-doy172/'):
+"""
+Fonction permettant de prendre en entrée le fichier principal contenant tous les fichiers de données de luminances et
+d'éclairement (main_folder). path_file correspond au fichier étudié. Cette fonction permet de créer une matrice à 6 
+dimensions ('result') : la première correspondant à la bande sélectionnée (0 pour la bande A, et 1 pour la bande B),
+le dossier où on souhaite se situer (n_folder), le fichier qu'on souhaite choisir (n_file) dans n_folder, le modèle
+de réflectance choisi, le modèle de fluorescence choisi, et s'il y'a présence de bruit (valeur 0) ou pas (valeur 1).
+Cette fonction permet aussi de calculer le temps pris pour effectuer tout le calcul.
+"""
+def create_database_sfm(main_folder,path_file):
     n_folder = len(os.listdir(main_folder))
     n_file = len(os.listdir(path_file))
 
@@ -193,8 +228,14 @@ def create_database_sfm(main_folder='‎/Volumes/W H/Stage M2/Codes/DATA/LUMINAN
                             result[h, i, j, k, l, m] = main(filename, a_peak, False, wvl_min, wvl_max, reflectance_method, fluo_method, reflectance_dof, fluo_dof, noise, choosed_band = Choosed_band)[0]
     return result
 
+"""
+Fonction prenant en entrée le résultat de la fonction précédente, exécutant ainsi la fonction main().
+"""
 def save_table(result):
     np.save('resultats_SFM', result)
 
+"""
+On stocke le résultat dans un fichier .npy
+"""
 res = create_database_sfm()
 save_table(res)
